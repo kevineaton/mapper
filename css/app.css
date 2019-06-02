@@ -1,0 +1,15 @@
+
+#map {
+  height: 100%;
+}
+
+#mapsSetupRow {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+
+#csvInput {
+  height: 300px;
+  width: 100%;
+  font-size: 8px;
+}

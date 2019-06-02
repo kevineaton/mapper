@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+    integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+  <link rel="stylesheet" href="./css/app.css">
+  
+  <title>Mapper</title>
+
+</head>
+
+<body>
+  <div class="container-fluid">
+    <div class="row">
+      <div class="col-3 border-right">
+        <div class="form-group">
+          <label>Time Zone</label>
+          <select id="timezone" class="form-control">
+            <option value="utc">Time data is UTC</option>
+            <option value="no">Time is Local</option>
+          </select>
+          </select>
+          <label>CSV</label>
+          <textarea id="csvInput" class="form-control"></textarea>
+          <button id="csvButton" class="btn btn-block btn-primary" onClick="parseCSV()">Parse CSV and Update</button>
+        </div>
+      </div>
+      <div class="col-9">
+        <select id="timeSelect" class="form-control" onChange="timeChange()">
+          <option value="0">No Data</option>
+        </select>
+        <div id="map"></div>
+        <div class="row" id="mapsSetupRow">
+            <div class="col-2">
+              <label>Google Maps API Key</label>
+            </div>
+            <div class="col-8">
+              <input type="text" class="form-control" id="mapsApiKeyInput" value="" />
+            </div>
+            <div class="col-2">
+              <button class="btn btn-block btn-primary" onClick="setupMap()" id="setupMapButton">Setup Map</button>
+            </div>
+          </div>
+      </div>
+    </div>
+  </div>
+  <script src="http://code.jquery.com/jquery-3.3.1.slim.js"
+    integrity="sha256-fNXJFIlca05BIO2Y5zh1xrShK3ME+/lYZ0j+ChxX2DA=" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"
+    integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q"
+    crossorigin="anonymous"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"
+    integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
+    crossorigin="anonymous"></script>
+    <script src="./scripts/moment.js" type="text/javascript"></script>
+    <script src="./scripts/csv.min.js" type="text/javascript"></script>
+
+  <script>
+    // single page globals for state
+    // todo would be to wrap these in an object for namespacing
+    let map = null;
+    let gpsPoints = [];
+    let mapsApiKey = "";
+    const colors = [
+      "#0551f2",
+      "#ac62b3",
+      "#a5cedb",
+      "#f0285b",
+      "#6ac31e",
+      "#1128aa",
+      "#c74941",
+      "#877cff"
+    ];
+
+    const setupMap = () => {
+      // only allow it to be added if the api key is blank
+      // load the map then hide the load button
+      const input = document.getElementById("mapsApiKeyInput").value;
+      if(mapsApiKey === "" && input !== ""){
+        mapsApiKey = input;
+        let script = document.createElement("script");
+        script.type = "text/javascript";
+        script.src = "https://maps.googleapis.com/maps/api/js?key="+mapsApiKey+"&callback=initMap"
+        script.async = true;
+        script.defer = true;
+        document.body.appendChild(script);
+
+        document.getElementById("mapsSetupRow").style.display = "none";
+      }
+    };
+
+    function initMap() {
+      const mapOptions = {
+        zoom: 2,
+        center: {lat: 0, lng: 0},
+        mapTypeId: 'terrain'
+      };
+      // if GPS locations are already parsed, zoom in
+      if(gpsPoints.length !== 0){
+        mapOptions.center = gpsPoints[0];
+        mapOptions.zoom = 18;
+      }
+
+      map = new google.maps.Map(document.getElementById('map'), mapOptions);
+      if(gpsPoints.length !== 0){
+        new google.maps.Marker({
+          position: gpsPoints[0],
+          label: "1",
+          map: map,
+          title: 'Start'
+        });
+      }
+
+    }
+
+    // functions to handle various actions
+    const parseCSV = () => {
+      const csvString = document.getElementById("csvInput").value;
+      if (csvString !== "") {
+        var parsedPoints = $.csv.toObjects(csvString);
+        gpsPoints = [];
+        const isUTC = document.getElementById("timezone").value === "utc" ? true : false;
+        parsedPoints.forEach(point => {
+          // some checking here; if there is no 'time' or 'posted' fields, we fail
+          // ditto for the lat and lng fields
+          if(!point.time && !point.posted){
+            console.log("ERR");
+            next;
+          }
+          if((!point.lat && !point.latitude) || (!point.lng && !point.longitude)){
+            console.log("err");
+            next;
+          }
+
+          // process the time; must be either time or posted field
+          let time = point.time ? point.time : point.posted ? point.posted : null;
+          const timeMoment = isUTC ? moment.utc(time) : moment(time);
+          const latStr = point.lat ? point.lat : point.latitude;
+          const lngStr = point.lng ? point.lng : point.longitude;
+          const lat = parseFloat(latStr);
+          const lng = parseFloat(lngStr);
+
+          // build the object
+          const temp = {
+            ...point,
+            lat,
+            lng,
+            time: timeMoment,
+          };
+          gpsPoints.push(temp);
+        });
+
+        gpsPoints.sort((a, b) => {
+          return a.time.isAfter(b.time) ? 1 : -1;
+        });
+
+        // update the select
+        const select = document.getElementById("timeSelect");
+        $("#timeSelect").empty();
+
+        // now add them in
+        for(let i = 0; i < gpsPoints.length; i++){
+          let dur = 0;
+          let durStr = "";
+          if(i !== 0){
+            dur = gpsPoints[i].time.diff(gpsPoints[i-1].time, "seconds");
+          
+            // dur is in seconds, so let's make it a little more readable
+            if(dur < 60){
+              durStr = dur + " seconds from last"
+            } else if(dur <= (60 * 60)) {
+              dur = Math.round(dur / 60);
+              durStr = dur + " minutes from last"
+            } else if(dur <= 60 * 60 * 24) {
+              dur = Math.round(dur / (60 * 60));
+              durStr = dur + " hours from last"
+            } else {
+              // days
+              dur = Math.round(dur / (60 * 60 * 24));
+              durStr = dur + " days from last"
+            }
+          }
+          const point = gpsPoints[i];
+          const opt = document.createElement("option");
+          opt.value = i;
+          opt.text = point.time.format("MM/DD/YY HH:mm:ss") + " " + durStr;
+          select.add(opt);
+        }
+        // finally, trigger a change
+        timeChange();
+      }
+    }
+
+    const timeChange = () => {
+      const select = document.getElementById("timeSelect");
+      const endIndex = select.value;
+      let colorIndex = 0;
+      // draw a line for all the points
+      // if it is just a single point, we put a marker
+      if(gpsPoints.length === 1){
+        new google.maps.Marker({
+          position: gpsPoints[0],
+          label: "1",
+          map: map,
+          title: 'Start'
+        });
+      } else {
+        for(let i = 1; i < endIndex; i++){
+          colorIndex++;
+          if(colorIndex > colors.length){
+            colorIndex = 0;
+          }
+          var curPath = new google.maps.Polyline({
+            path: [gpsPoints[i-1], gpsPoints[i]],
+            geodesic: true,
+            strokeColor: colors[colorIndex],
+            strokeOpacity: 1.0,
+            strokeWeight: 2
+          });
+          curPath.setMap(map);
+        }
+      }
+    }
+  </script>
+</body>
+
+</html>
